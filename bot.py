@@ -1,6 +1,6 @@
 """
 Guitar Chord Telegram Bot
-Uses Playwright to bypass Cloudflare on Ultimate Guitar.
+Uses cffi to bypass Cloudflare on Ultimate Guitar.
 """
 
 import os
@@ -10,6 +10,7 @@ import asyncio
 import tempfile
 import json
 from pathlib import Path
+from html import unescape
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -250,6 +251,7 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
 
             content = re.sub(r"\[tab\]|\[/tab\]", "", content)
             content = re.sub(r"\[ch\](.*?)\[/ch\]", r"\1", content)
+            content = clean_text(content)
             lines = content.split("\n")
 
             return {
@@ -276,6 +278,19 @@ def simplify_chord(chord: str) -> str:
     root = match.group(1)
     minor = match.group(2) or ""
     return root + minor
+
+# ── Text cleaning ────
+def clean_text(text: str) -> str:
+    """Decode HTML entities and normalize special characters."""
+    import unicodedata
+    text = unescape(text)  # decode &#039; &amp; &quot; etc.
+    text = unicodedata.normalize("NFKC", text)  # normalize unicode (curly quotes, etc.)
+    # Replace common problematic characters
+    text = text.replace("\u2019", "'").replace("\u2018", "'")  # curly apostrophes
+    text = text.replace("\u201c", '"').replace("\u201d", '"')  # curly quotes
+    text = text.replace("\u2013", "-").replace("\u2014", "-")  # en/em dash
+    text = text.replace("\u2026", "...")                        # ellipsis
+    return text
 
 # ── PDF generation ────
 def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
@@ -337,14 +352,12 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
             story.append(Spacer(1, 2*mm))
             continue
         if is_chord_line(raw_line):
-            # Always simplify + transpose if needed
             raw_line = transpose_line(raw_line, semitones, simplify=True)
-            safe = raw_line.replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
+            safe = clean_text(raw_line).replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe, chord_style))
         else:
-            safe = raw_line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            safe = clean_text(raw_line).replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe, lyric_style))
-
     doc.build(story)
 
 # ── Message parsing ────
