@@ -25,7 +25,6 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Preformatted
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib import colors
 
 # ── Logging ────
@@ -318,7 +317,6 @@ _pdf_styles = None
 def get_pdf_styles():
     global _pdf_styles
     if _pdf_styles is None:
-        styles = getSampleStyleSheet()
         _pdf_styles = {
             "title":   ParagraphStyle("ChordTitle", parent=styles["Title"],
                         fontSize=18, leading=22, textColor=colors.HexColor("#d32f2f")),
@@ -358,7 +356,6 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
         leftMargin=15*mm, rightMargin=15*mm,
         topMargin=15*mm, bottomMargin=15*mm,
     )
-    styles = getSampleStyleSheet()
     s = get_pdf_styles()
 
     story = []
@@ -385,11 +382,11 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
             continue
         if is_chord_line(raw_line):
             raw_line = transpose_line(raw_line, semitones, simplify=True)
-            safe = clean_text(raw_line).replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
-            story.append(Paragraph(safe, s["chord"]))
-        else:
             story.append(Preformatted(clean_text(raw_line), s["chord"]))
-    doc.build(story)
+        else:
+            safe = clean_text(raw_line).replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
+            story.append(Paragraph(safe, s["lyric"]))
+            doc.build(story)
 
 # ── Message parsing ────
 def parse_request(text: str):
