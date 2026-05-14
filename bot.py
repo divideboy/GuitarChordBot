@@ -24,6 +24,7 @@ from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTyp
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Preformatted
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib import colors
 
@@ -287,7 +288,10 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
 KEEP_MINOR = re.compile(r"^[A-G][b#]?m$")  # already simple minor e.g. Am, F#m
 
 def simplify_chord(chord: str) -> str:
-    """Strip complex suffixes, keeping only root + optional minor."""
+    """Strip complex suffixes and slash bass notes, keeping only root + optional minor."""
+    # Remove slash bass note first (e.g. G/B → G, Bb/D → Bb)
+    chord = chord.split("/")[0]
+    # Then strip complex suffixes
     match = re.match(r"^([A-G][b#]?)(m(?!aj))?", chord)
     if not match:
         return chord
@@ -384,8 +388,7 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
             safe = clean_text(raw_line).replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe, s["chord"]))
         else:
-            safe = clean_text(raw_line).replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
-            story.append(Paragraph(safe, s["lyric"]))
+            story.append(Preformatted(clean_text(raw_line), chord_style))
     doc.build(story)
 
 # ── Message parsing ────
