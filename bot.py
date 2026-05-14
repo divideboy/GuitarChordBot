@@ -317,6 +317,7 @@ _pdf_styles = None
 def get_pdf_styles():
     global _pdf_styles
     if _pdf_styles is None:
+        styles = getSampleStyleSheet()
         _pdf_styles = {
             "title":   ParagraphStyle("ChordTitle", parent=styles["Title"],
                         fontSize=18, leading=22, textColor=colors.HexColor("#d32f2f")),
@@ -386,7 +387,7 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
         else:
             safe = clean_text(raw_line).replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe, s["lyric"]))
-            doc.build(story)
+    doc.build(story)
 
 # ── Message parsing ────
 def parse_request(text: str):
