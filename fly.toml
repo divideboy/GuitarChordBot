@@ -12,6 +12,6 @@ primary_region = "sin"
   cpu_kind = "shared"
   cpus = 1
 
-[restart]
+[[restart]]
   policy = "always"        # auto-restart if it crashes
   max_retries = 10
