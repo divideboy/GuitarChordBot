@@ -9,14 +9,16 @@ import logging
 import asyncio
 import tempfile
 import json
+import math
+import gc
 from pathlib import Path
 from html import unescape
+import signal
 
 from dotenv import load_dotenv
 load_dotenv()
 
 from curl_cffi.requests import AsyncSession
-import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes, CommandHandler
 from reportlab.lib.pagesizes import A4
@@ -40,6 +42,15 @@ FLAT_TO_SHARP = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
 CHORD_PATTERN = re.compile(
     r"\b([A-G][b#]?)(maj7|maj|min7|min|m7|m|7|sus2|sus4|aug|dim|add9|6|9|11|13)?\b"
 )
+
+# ── Global HTTP session ────
+_session: AsyncSession | None = None
+
+def get_session() -> AsyncSession:
+    global _session
+    if _session is None:
+        _session = AsyncSession()
+    return _session
 
 def normalize_root(root):
     return FLAT_TO_SHARP.get(root, root)
@@ -84,6 +95,13 @@ def detect_key_from_chords(lines):
             if m:
                 return normalize_root(m.group(1))
     return None
+
+async def scheduled_restart(app):
+    """Restart the bot every 6 hours to free memory."""
+    while True:
+        await asyncio.sleep(6 * 60 * 60)  # 6 hours
+        logger.info("Scheduled restart triggered")
+        os.kill(os.getpid(), signal.SIGTERM)
 
 # ── Playwright scraper ────
 async def get_js_store(page) -> dict | None:
@@ -156,7 +174,6 @@ def pick_best_tab(results: list) -> str | None:
         votes      = int(r.get("votes", 0) or 0)
         # weighted: rating * log(votes+1) so a 5-star with 1000 votes
         # beats a 5-star with 2 votes
-        import math
         return rating * math.log(votes + 1)
 
     best = max(chord_tabs, key=score)
@@ -183,8 +200,8 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         "Referer": "https://www.ultimate-guitar.com/",
     }
 
-    async with AsyncSession() as session:
-        try:
+    session = get_session()
+    try:
             # ── Step 1: Search page ────
             logger.info(f"Fetching: {ug_search_url}")
             resp = await session.get(ug_search_url, impersonate="chrome124", headers=headers, timeout=30)
@@ -262,8 +279,7 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
                 "capo": capo,
                 "source_url": tab_url,
             }
-
-        except Exception as e:
+    except Exception as e:
             logger.error(f"curl_cffi scrape error: {e}", exc_info=True)
             return None
 
@@ -292,6 +308,29 @@ def clean_text(text: str) -> str:
     text = text.replace("\u2026", "...")                        # ellipsis
     return text
 
+# ── Cached PDF styles ────
+_pdf_styles = None
+
+def get_pdf_styles():
+    global _pdf_styles
+    if _pdf_styles is None:
+        styles = getSampleStyleSheet()
+        _pdf_styles = {
+            "title":   ParagraphStyle("ChordTitle", parent=styles["Title"],
+                        fontSize=18, leading=22, textColor=colors.HexColor("#d32f2f")),
+            "meta":    ParagraphStyle("Meta", parent=styles["Normal"],
+                        fontSize=9, leading=12, textColor=colors.HexColor("#555555")),
+            "section": ParagraphStyle("Section", parent=styles["Normal"],
+                        fontSize=10, leading=13, textColor=colors.HexColor("#1565c0"),
+                        fontName="Helvetica-Bold"),
+            "chord":   ParagraphStyle("Chord", parent=styles["Normal"],
+                        fontSize=9, leading=11, fontName="Courier-Bold",
+                        textColor=colors.HexColor("#c62828")),
+            "lyric":   ParagraphStyle("Lyric", parent=styles["Normal"],
+                        fontSize=10, leading=13, fontName="Courier"),
+        }
+    return _pdf_styles
+
 # ── PDF generation ────
 def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
     lines   = chord_data["lines"]
@@ -316,28 +355,17 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
         topMargin=15*mm, bottomMargin=15*mm,
     )
     styles = getSampleStyleSheet()
-    title_style   = ParagraphStyle("ChordTitle", parent=styles["Title"],
-                    fontSize=18, leading=22, textColor=colors.HexColor("#d32f2f"))
-    meta_style    = ParagraphStyle("Meta", parent=styles["Normal"],
-                    fontSize=9, leading=12, textColor=colors.HexColor("#5555"))
-    section_style = ParagraphStyle("Section", parent=styles["Normal"],
-                    fontSize=10, leading=13, textColor=colors.HexColor("#1565c0"),
-                    fontName="Helvetica-Bold")
-    chord_style   = ParagraphStyle("Chord", parent=styles["Normal"],
-                    fontSize=9, leading=11, fontName="Courier-Bold",
-                    textColor=colors.HexColor("#c62828"))
-    lyric_style   = ParagraphStyle("Lyric", parent=styles["Normal"],
-                    fontSize=10, leading=13, fontName="Courier")
+    s = get_pdf_styles()
 
     story = []
-    story.append(Paragraph(title, title_style))
-    story.append(Paragraph(f"by {artist}", meta_style))
+    story.append(Paragraph(title, s["title"]))
+    story.append(Paragraph(f"by {artist}", s["meta"]))
     story.append(Spacer(1, 2*mm))
 
     meta_line = f"Tuning: {tuning}  |  Capo: {capo}  |  Key: {display_key}"
     if semitones:
         meta_line += f"  (transposed {semitones:+d} semitones from {original_key})"
-    story.append(Paragraph(meta_line, meta_style))
+    story.append(Paragraph(meta_line, s["meta"]))
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey, spaceAfter=3*mm))
 
     section_re = re.compile(r"^\[(.*?)\]$")
@@ -346,7 +374,7 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
         sm = section_re.match(raw_line)
         if sm:
             story.append(Spacer(1, 3*mm))
-            story.append(Paragraph(sm.group(1).upper(), section_style))
+            story.append(Paragraph(sm.group(1).upper(), s["section"]))
             continue
         if not raw_line.strip():
             story.append(Spacer(1, 2*mm))
@@ -354,10 +382,10 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
         if is_chord_line(raw_line):
             raw_line = transpose_line(raw_line, semitones, simplify=True)
             safe = clean_text(raw_line).replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
-            story.append(Paragraph(safe, chord_style))
+            story.append(Paragraph(safe, s["chord"]))
         else:
             safe = clean_text(raw_line).replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
-            story.append(Paragraph(safe, lyric_style))
+            story.append(Paragraph(safe, s["lyric"]))
     doc.build(story)
 
 # ── Message parsing ────
@@ -429,6 +457,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Error generating PDF: {e}")
     finally:
         Path(pdf_path).unlink(missing_ok=True)
+        gc.collect()
 
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -452,6 +481,9 @@ if __name__ == "__main__":
         app.add_handler(CommandHandler("start", handle_start))
         app.add_handler(CommandHandler("help", handle_start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+        asyncio.create_task(scheduled_restart(app))
+
         logger.info("Bot is running...")
         async with app:
             await app.initialize()
