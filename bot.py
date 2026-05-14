@@ -388,7 +388,7 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
             safe = clean_text(raw_line).replace("&", "&amp;").replace("<​", "&lt;").replace(">", "&gt;")
             story.append(Paragraph(safe, s["chord"]))
         else:
-            story.append(Preformatted(clean_text(raw_line), chord_style))
+            story.append(Preformatted(clean_text(raw_line), s["chord"]))
     doc.build(story)
 
 # ── Message parsing ────
