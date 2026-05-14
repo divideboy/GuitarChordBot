@@ -7,6 +7,15 @@ primary_region = "sin"
 [env]
   PYTHONUNBUFFERED = "1"
 
+[deploy]
+  strategy = "immediate"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
+  count = 1
+
 [[vm]]
   memory = "256mb"
   cpu_kind = "shared"
