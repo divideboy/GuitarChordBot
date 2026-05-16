@@ -70,7 +70,11 @@ def transpose_chord(chord, semitones):
 def semitones_between(from_key, to_key):
     from_key = normalize_root(from_key)
     to_key   = normalize_root(to_key)
-    return (CHROMATIC.index(to_key) - CHROMATIC.index(from_key)) % 12
+    diff = (CHROMATIC.index(to_key) - CHROMATIC.index(from_key)) % 12
+    # If more than 6 semitones up, go down instead (shorter path)
+    if diff > 6:
+        diff -= 12
+    return diff
 
 def transpose_line(line: str, semitones: int, simplify: bool = True) -> str:
     def replace_chord(m):
