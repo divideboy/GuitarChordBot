@@ -3,6 +3,7 @@ Guitar Chord Telegram Bot
 Uses cffi to bypass Cloudflare on Ultimate Guitar.
 """
 
+from curses import raw
 import os
 import re
 import logging
@@ -202,86 +203,100 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
 
     session = get_session()
     try:
-            # ── Step 1: Search page ────
-            logger.info(f"Fetching: {ug_search_url}")
-            resp = await session.get(ug_search_url, impersonate="chrome124", headers=headers, timeout=30)
+        # ── Step 1: Search page ────
+        logger.info(f"Fetching: {ug_search_url}")
+        html = None
+        for impersonate in ["chrome124", "chrome110", "safari17_0"]:
+            resp = await session.get(ug_search_url, impersonate=impersonate, headers=headers, timeout=30)
             html = resp.text
+            if "Just a moment" not in html and "Performing security verification" not in html:
+                break
+            logger.warning(f"Cloudflare challenge with {impersonate}, retrying...")
+            _session = None
+            session = get_session()
 
-            # Check for Cloudflare block
-            if "Just a moment" in html or "Performing security verification" in html:
-                logger.warning("Cloudflare challenge hit on search page")
-                return None
-
-            # Extract js-store from raw HTML
-            match = re.search(r'data-content="({.*?})"', html)
-            if not match:
-                logger.warning("js-store not found in search page HTML")
-                logger.warning(f"Page snippet: {html[:300]}")
-                return None
-
-            raw = match.group(1).replace("&quot;", '"').replace("&amp;", "&")
-            data = json.loads(raw)
-
-            try:
-                results = data["store"]["page"]["data"]["results"]
-            except KeyError:
-                logger.warning(f"Unexpected JSON structure: {list(data.keys())}")
-                return None
-
-            logger.info(f"Found {len(results)} search results")
-            for r in results[:5]:
-                logger.info(f"  [{r.get('type')}] {r.get('song_name')} — rating={r.get('rating')} votes={r.get('votes')}")
-
-            tab_url = pick_best_tab(results)
-            if not tab_url:
-                logger.warning("No chords tab found in results")
-                return None
-
-            # ── Step 2: Tab page ────
-            logger.info(f"Fetching tab page: {tab_url}")
-            resp2 = await session.get(tab_url, impersonate="chrome124", headers=headers, timeout=30)
-            html2 = resp2.text
-
-            if "Just a moment" in html2 or "Performing security verification" in html2:
-                logger.warning("Cloudflare challenge hit on tab page")
-                return None
-
-            match2 = re.search(r'data-content="({.*?})"', html2)
-            if not match2:
-                logger.warning("js-store not found in tab page HTML")
-                return None
-
-            raw2 = match2.group(1).replace("&quot;", '"').replace("&amp;", "&")
-            data2 = json.loads(raw2)
-
-            tab_data = data2["store"]["page"]["data"]["tab"]
-            tab_view = data2["store"]["page"]["data"]["tab_view"]
-
-            title       = tab_data.get("song_name", "Unknown")
-            artist_name = tab_data.get("artist_name", "Unknown")
-            tuning      = tab_view.get("meta", {}).get("tuning", {}).get("value", "Standard")
-            capo        = str(tab_view.get("meta", {}).get("capo", 0) or "None")
-
-            content = tab_view.get("wiki_tab", {}).get("content", "")
-            if not content:
-                content = tab_view.get("content", "")
-
-            content = re.sub(r"\[tab\]|\[/tab\]", "", content)
-            content = re.sub(r"\[ch\](.*?)\[/ch\]", r"\1", content)
-            content = clean_text(content)
-            lines = content.split("\n")
-
-            return {
-                "title": title,
-                "artist": artist_name,
-                "lines": lines,
-                "tuning": tuning,
-                "capo": capo,
-                "source_url": tab_url,
-            }
-    except Exception as e:
-            logger.error(f"curl_cffi scrape error: {e}", exc_info=True)
+        if not html or "Just a moment" in html or "Performing security verification" in html:
+            logger.warning("Cloudflare challenge hit on search page — all impersonations failed")
             return None
+
+        await asyncio.sleep(1.5)
+
+        match = re.search(r'data-content="({.*?})"', html)
+        if not match:
+            logger.warning("js-store not found in search page HTML")
+            logger.warning(f"Page snippet: {html[:300]}")
+            return None
+
+        raw = match.group(1).replace("&quot;", '"').replace("&amp;", "&")
+        data = json.loads(raw)
+
+        try:
+            results = data["store"]["page"]["data"]["results"]
+        except KeyError:
+            logger.warning(f"Unexpected JSON structure: {list(data.keys())}")
+            return None
+
+        logger.info(f"Found {len(results)} search results")
+        for r in results[:5]:
+            logger.info(f"  [{r.get('type')}] {r.get('song_name')} — rating={r.get('rating')} votes={r.get('votes')}")
+
+        tab_url = pick_best_tab(results)
+        if not tab_url:
+            logger.warning("No chords tab found in results")
+            return None
+
+        # ── Step 2: Tab page ────
+        logger.info(f"Fetching tab page: {tab_url}")
+        html2 = None
+        for impersonate in ["chrome124", "chrome110", "safari17_0"]:
+            resp2 = await session.get(tab_url, impersonate=impersonate, headers=headers, timeout=30)
+            html2 = resp2.text
+            if "Just a moment" not in html2 and "Performing security verification" not in html2:
+                break
+            logger.warning(f"Cloudflare challenge on tab page with {impersonate}, retrying...")
+            _session = None
+            session = get_session()
+
+        if not html2 or "Just a moment" in html2 or "Performing security verification" in html2:
+            logger.warning("Cloudflare challenge hit on tab page — all impersonations failed")
+            return None
+
+        match2 = re.search(r'data-content="({.*?})"', html2)
+        if not match2:
+            logger.warning("js-store not found in tab page HTML")
+            return None
+
+        raw2 = match2.group(1).replace("&quot;", '"').replace("&amp;", "&")
+        data2 = json.loads(raw2)
+
+        tab_data = data2["store"]["page"]["data"]["tab"]
+        tab_view = data2["store"]["page"]["data"]["tab_view"]
+
+        title       = tab_data.get("song_name", "Unknown")
+        artist_name = tab_data.get("artist_name", "Unknown")
+        tuning      = tab_view.get("meta", {}).get("tuning", {}).get("value", "Standard")
+        capo        = str(tab_view.get("meta", {}).get("capo", 0) or "None")
+
+        content = tab_view.get("wiki_tab", {}).get("content", "")
+        if not content:
+            content = tab_view.get("content", "")
+        content = re.sub(r"\[tab\]|\[/tab\]", "", content)
+        content = re.sub(r"\[ch\](.*?)\[/ch\]", r"\1", content)
+        content = clean_text(content)
+        lines = content.split("\n")
+
+        return {
+            "title": title,
+            "artist": artist_name,
+            "lines": lines,
+            "tuning": tuning,
+            "capo": capo,
+            "source_url": tab_url,
+        }
+
+    except Exception as e:
+        logger.error(f"curl_cffi scrape error: {e}", exc_info=True)
+        return Nonex
 
 # ── Chord simplification ────
 KEEP_MINOR = re.compile(r"^[A-G][b#]?m$")  # already simple minor e.g. Am, F#m
