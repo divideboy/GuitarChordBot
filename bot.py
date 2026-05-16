@@ -410,6 +410,10 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
 
 # ── Message parsing ────
 def parse_request(text: str):
+    # Normalize smart/curly quotes to straight quotes
+    text = text.replace("\u201c", '"').replace("\u201d", '"')  # " "
+    text = text.replace("\u2018", "'").replace("\u2019", "'")  # ' '
+
     parts = re.findall(r'"([^"]+)"', text)
     if len(parts) >= 2:
         query, key = parts[0].strip(), parts[1].strip()
@@ -417,8 +421,19 @@ def parse_request(text: str):
         query, key = parts[0].strip(), None
     else:
         query, key = text.strip(), None
-    if key and not re.match(r"^[A-G][b#]?", key):
+
+    # Also support unquoted key at the end e.g. "Hosanna Hillsong" C
+    if key is None:
+        m = re.search(r'\b([A-G][b#]?m?)\s*$', text)
+        if m:
+            key = m.group(1)
+            query = text[:m.start()].strip().strip('"').strip()
+
+    if key and not re.match(r"^[A-G][b#]?m?$", key, re.IGNORECASE):
         key = None
+    if key:
+        key = key.capitalize()
+
     return query, key
 
 # ── Bot handlers ────
