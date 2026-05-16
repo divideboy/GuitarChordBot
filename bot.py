@@ -482,11 +482,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"{chord_data['artist']} - {chord_data['title']}.pdf")
         with open(pdf_path, "rb") as f:
             await context.bot.send_document(
-                chat_id=chat_id,
-                document=f,
-                filename=filename,
-                caption=f"🎵 {chord_data['title']} — {chord_data['artist']}\nSource: {chord_data['source_url']}",
-            )
+        chat_id=chat_id,
+        document=f,
+        filename=filename,
+        caption=f"🎵 {chord_data['title']} — {chord_data['artist']}\nSource: {chord_data['source_url']}",
+        read_timeout=60,
+        write_timeout=60,
+        connect_timeout=30,
+    )
     except Exception as e:
         logger.error(f"PDF error: {e}", exc_info=True)
         await update.message.reply_text(f"❌ Error generating PDF: {e}")
