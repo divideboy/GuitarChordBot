@@ -20,12 +20,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from curl_cffi.requests import AsyncSession
-from telegram import Update
-from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes, CommandHandler
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import mm
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable, Preformatted
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder, MessageHandler, filters,
+    ContextTypes, CommandHandler, CallbackQueryHandler,
+)
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, HRFlowable,
+    Preformatted, Table, TableStyle, Flowable,
+)
 from reportlab.lib import colors
 
 # ── Logging ────
@@ -43,6 +46,89 @@ FLAT_TO_SHARP = {"Db": "C#", "Eb": "D#", "Gb": "F#", "Ab": "G#", "Bb": "A#"}
 CHORD_PATTERN = re.compile(
     r"\b([A-G][b#]?)(maj7|maj|min7|min|m7|m|7|sus2|sus4|aug|dim|add9|6|9|11|13)?\b"
 )
+HARD_CHORD_DIAGRAMS = {
+    "F":   {"pos": [ 1,  3,  3,  2,  1,  1], "base": 1},
+    "Fm":  {"pos": [ 1,  3,  3,  1,  1,  1], "base": 1},
+    "F#":  {"pos": [ 2,  4,  4,  3,  2,  2], "base": 2},
+    "F#m": {"pos": [ 2,  4,  4,  2,  2,  2], "base": 2},
+    "B":   {"pos": [-1,  2,  4,  4,  4,  2], "base": 2},
+    "Bm":  {"pos": [-1,  2,  4,  4,  3,  2], "base": 2},
+    "Bb":  {"pos": [-1,  1,  3,  3,  3,  1], "base": 1},
+    "Bbm": {"pos": [-1,  1,  3,  3,  2,  1], "base": 1},
+    "Cm":  {"pos": [-1,  3,  5,  5,  4,  3], "base": 3},
+    "C#":  {"pos": [-1,  4,  6,  6,  6,  4], "base": 4},
+    "C#m": {"pos": [-1,  4,  6,  6,  5,  4], "base": 4},
+    "Eb":  {"pos": [-1,  6,  8,  8,  8,  6], "base": 6},
+    "Ebm": {"pos": [-1,  6,  8,  8,  7,  6], "base": 6},
+    "G#m": {"pos": [ 4,  6,  6,  4,  4,  4], "base": 4},
+    "Ab":  {"pos": [ 4,  6,  6,  5,  4,  4], "base": 4},
+}
+
+class ChordDiagram(Flowable):
+    S_GAP = 6; F_GAP = 6.5; FRETS = 4; N_STR = 6; DOT_R = 2.4; PAD = 5
+
+    def __init__(self, name, positions, base_fret=1):
+        super().__init__()
+        self.chord_name = name
+        self.positions  = positions
+        self.base_fret  = base_fret
+        self.width  = (self.N_STR - 1) * self.S_GAP + self.PAD * 2 + 10
+        self.height = self.FRETS * self.F_GAP + self.PAD * 2 + 16
+
+    def draw(self):
+        c = self.canv
+        sg, fg = self.S_GAP, self.F_GAP
+        nf, ns, pad = self.FRETS, self.N_STR, self.PAD
+        gw = (ns - 1) * sg
+        gh = nf * fg
+        ox = pad + 4
+        oy = pad + 2
+
+        c.setFont("Helvetica-Bold", 7)
+        c.setFillColor(colors.HexColor("#c62828"))
+        c.drawCentredString(ox + gw / 2, oy + gh + 8, self.chord_name)
+        c.setFillColor(colors.black)
+
+        if self.base_fret == 1:
+            c.setLineWidth(2.5)
+            c.setStrokeColor(colors.black)
+            c.line(ox, oy + gh, ox + gw, oy + gh)
+        else:
+            c.setLineWidth(0.5)
+            c.setStrokeColor(colors.HexColor("#888888"))
+            c.line(ox, oy + gh, ox + gw, oy + gh)
+            c.setFont("Helvetica", 5.5)
+            c.drawString(ox + gw + 2, oy + gh - fg / 2, f"{self.base_fret}fr")
+
+        c.setLineWidth(0.4)
+        c.setStrokeColor(colors.HexColor("#aaaaaa"))
+        for i in range(nf + 1):
+            c.line(ox, oy + gh - i * fg, ox + gw, oy + gh - i * fg)
+
+        c.setLineWidth(0.7)
+        c.setStrokeColor(colors.black)
+        for i in range(ns):
+            c.line(ox + i * sg, oy, ox + i * sg, oy + gh)
+
+        for s_idx, fret in enumerate(self.positions):
+            x = ox + s_idx * sg
+            top_y = oy + gh
+            if fret == -1:
+                c.setFont("Helvetica-Bold", 7)
+                c.setFillColor(colors.black)
+                c.drawCentredString(x, top_y + 2, "×")
+            elif fret == 0:
+                c.setStrokeColor(colors.black)
+                c.setFillColor(colors.white)
+                c.setLineWidth(0.8)
+                c.circle(x, top_y + 3, 2, stroke=1, fill=1)
+                c.setFillColor(colors.black)
+            else:
+                rel = fret - self.base_fret
+                if 0 <= rel < nf:
+                    c.setFillColor(colors.HexColor("#c62828"))
+                    c.circle(x, top_y - rel * fg - fg / 2, self.DOT_R, stroke=0, fill=1)
+                    c.setFillColor(colors.black)
 
 # ── Global HTTP session ────
 _session: AsyncSession | None = None
@@ -100,6 +186,41 @@ def detect_key_from_chords(lines):
             if m:
                 return normalize_root(m.group(1))
     return None
+
+def get_hard_chords_in_song(lines: list, semitones: int = 0) -> list:
+    found = set()
+    for line in lines:
+        if is_chord_line(line):
+            for m in CHORD_PATTERN.finditer(line):
+                chord = m.group(0)
+                if semitones:
+                    chord = transpose_chord(chord, semitones)
+                chord = simplify_chord(chord)
+                if chord in HARD_CHORD_DIAGRAMS:
+                    found.add(chord)
+    return [k for k in HARD_CHORD_DIAGRAMS if k in found]
+
+def build_chord_ref_section(hard_chords: list) -> list:
+    if not hard_chords:
+        return []
+    s = get_pdf_styles()
+    diagrams = [ChordDiagram(n, HARD_CHORD_DIAGRAMS[n]["pos"], HARD_CHORD_DIAGRAMS[n]["base"]) for n in hard_chords]
+    col_w = diagrams[0].width
+    tbl = Table([diagrams], colWidths=[col_w] * len(diagrams))
+    tbl.setStyle(TableStyle([
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+        ("ALIGN",  (0,0), (-1,-1), "CENTER"),
+        ("LEFTPADDING",   (0,0), (-1,-1), 3),
+        ("RIGHTPADDING",  (0,0), (-1,-1), 3),
+        ("TOPPADDING",    (0,0), (-1,-1), 2),
+        ("BOTTOMPADDING", (0,0), (-1,-1), 2),
+    ]))
+    return [
+        Paragraph("Chord Reference", s["ref_hdr"]),
+        Spacer(1, 2*mm),
+        tbl,
+        HRFlowable(width="100%", thickness=0.5, color=colors.grey, spaceAfter=4*mm),
+    ]
 
 async def scheduled_restart(app):
     """Restart the bot every 6 hours to free memory."""
@@ -198,7 +319,6 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         f"https://www.ultimate-guitar.com/search.php"
         f"?search_type=title&value={query}"
     )
-
     headers = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
@@ -280,6 +400,17 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         artist_name = tab_data.get("artist_name", "Unknown")
         tuning      = tab_view.get("meta", {}).get("tuning", {}).get("value", "Standard")
         capo        = str(tab_view.get("meta", {}).get("capo", 0) or "None")
+        # BPM
+        tempo_raw = tab_view.get("meta", {}).get("tempo", None)
+        bpm = str(int(float(tempo_raw))) if tempo_raw else None
+        # Strumming pattern
+        strum = None
+        strum_match = re.search(
+            r'(?:strum(?:ming)?(?:\s+pattern)?[:\s]+)([DdUu \-↑↓x]+)',
+            content, re.IGNORECASE
+            )
+        if strum_match:
+            strum = strum_match.group(1).strip()
 
         content = tab_view.get("wiki_tab", {}).get("content", "")
         if not content:
@@ -296,11 +427,14 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
             "tuning": tuning,
             "capo": capo,
             "source_url": tab_url,
-        }
+            "bpm": bpm,
+            "strumming": strum,
+}
+
 
     except Exception as e:
         logger.error(f"curl_cffi scrape error: {e}", exc_info=True)
-        return Nonex
+        return None
 
 # ── Chord simplification ────
 KEEP_MINOR = re.compile(r"^[A-G][b#]?m$")  # already simple minor e.g. Am, F#m
@@ -338,6 +472,9 @@ def get_pdf_styles():
     if _pdf_styles is None:
         styles = getSampleStyleSheet()
         _pdf_styles = {
+            "ref_hdr": ParagraphStyle("RefHeader", parent=styles["Normal"],
+               fontSize=9, leading=11, fontName="Helvetica-Bold",
+               textColor=colors.HexColor("#1565c0")),
             "title":   ParagraphStyle("ChordTitle", parent=styles["Title"],
                         fontSize=18, leading=22, textColor=colors.HexColor("#d32f2f")),
             "meta":    ParagraphStyle("Meta", parent=styles["Normal"],
@@ -354,7 +491,7 @@ def get_pdf_styles():
     return _pdf_styles
 
 # ── PDF generation ────
-def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
+def build_pdf(chord_data: dict, target_key: str | None, target_semitones: int | None, output_path: str):
     lines   = chord_data["lines"]
     title   = chord_data["title"]
     artist  = chord_data["artist"]
@@ -363,8 +500,17 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
 
     original_key = detect_key_from_chords(lines)
     semitones = 0
-    display_key = original_key or "?"
-    if target_key and original_key:
+    if target_semitones is not None and original_key:
+        semitones = target_semitones
+        display_key = CHROMATIC[(CHROMATIC.index(normalize_root(original_key)) + semitones) % 12]
+
+    elif target_key and original_key:
+        display_key = original_key or "?"
+
+    if target_semitones is not None and original_key:
+        semitones = target_semitones
+        display_key = CHROMATIC[(CHROMATIC.index(normalize_root(original_key)) + semitones) % 12]
+    elif target_key and original_key:
         try:
             semitones = semitones_between(original_key, target_key)
             display_key = target_key
@@ -388,6 +534,11 @@ def build_pdf(chord_data: dict, target_key: str | None, output_path: str):
         meta_line += f"  (transposed {semitones:+d} semitones from {original_key})"
     story.append(Paragraph(meta_line, s["meta"]))
     story.append(HRFlowable(width="100%", thickness=0.5, color=colors.grey, spaceAfter=3*mm))
+    hard_chords = get_hard_chords_in_song(lines, semitones)
+    story.extend(build_chord_ref_section(hard_chords))
+    bpm_str   = f"BPM: {chord_data.get('bpm')}" if chord_data.get('bpm') else "BPM: N/A"
+    strum_str = f"Strumming: {chord_data.get('strumming')}" if chord_data.get('strumming')else "Strumming: Not Available"
+    story.append(Paragraph(f"{bpm_str}  |  {strum_str}", s["meta"]))
 
     section_re = re.compile(r"^\[(.*?)\]$")
     for raw_line in lines:
@@ -429,12 +580,18 @@ def parse_request(text: str):
             key = m.group(1)
             query = text[:m.start()].strip().strip('"').strip()
 
-    if key and not re.match(r"^[A-G][b#]?m?$", key, re.IGNORECASE):
-        key = None
+    target_key = None
+    target_semitones = None
+    if key:
+        if re.match(r'^[+-]\d+$', key):
+            target_semitones = int(key)
+    elif re.match(r'^[A-G][b#]?$', key):
+        target_key = key
+
     if key:
         key = key.capitalize()
 
-    return query, key
+    return query, target_key, target_semitones
 
 # ── Bot handlers ────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -445,8 +602,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
-    query, target_key = parse_request(text)
-    logger.info(f"Parsed → query={query!r}, key={target_key!r}")
+    target_semitones, query, target_key = parse_request(text)
+    logger.info(f"Parsed → query={query!r}, key={target_key!r}, semitones={target_semitones!r}")
 
     if not query:
         await update.message.reply_text('Please send a request like:\n"Wonderwall Oasis"')
@@ -467,7 +624,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    key_msg = f" in key of *{target_key}*" if target_key else " (original key)"
+    if target_semitones is not None:
+        key_msg = f" (transposed by {target_semitones} semitones)"
+    else:
+        key_msg = f" in key of *{target_key}*" if target_key else " (original key)"
     await update.message.reply_text(
         f"🎸 Generating PDF for *{chord_data['title']}* by *{chord_data['artist']}*{key_msg}...",
         parse_mode="Markdown"
@@ -477,7 +637,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pdf_path = tmp.name
 
     try:
-        build_pdf(chord_data, target_key, pdf_path)
+        build_pdf(chord_data, target_key, target_semitones, pdf_path)
         filename = re.sub(r'[\\/*?:"<>|]', "_",
                     f"{chord_data['artist']} - {chord_data['title']}.pdf")
         with open(pdf_path, "rb") as f:
@@ -496,6 +656,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     finally:
         Path(pdf_path).unlink(missing_ok=True)
         gc.collect()
+    context.chat_data["last_chord_data"] = chord_data
+    await send_transpose_keyboard(context.bot, chat_id, chord_data)
 
 
 async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -512,6 +674,59 @@ async def handle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
+async def send_transpose_keyboard(bot, chat_id: int, chord_data: dict):
+    original_key = detect_key_from_chords(chord_data["lines"]) or "?"
+    keyboard = [[
+        InlineKeyboardButton("-3", callback_data="tp:-3"),
+        InlineKeyboardButton("-2", callback_data="tp:-2"),
+        InlineKeyboardButton("-1", callback_data="tp:-1"),
+        InlineKeyboardButton("🔄 Original", callback_data="tp:0"),
+        InlineKeyboardButton("+1", callback_data="tp:+1"),
+        InlineKeyboardButton("+2", callback_data="tp:+2"),
+        InlineKeyboardButton("+3", callback_data="tp:+3"),
+    ]]
+    await bot.send_message(
+        chat_id=chat_id,
+        text=f"🎹 Transpose (original key: *{original_key}*)?",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+    )
+
+async def handle_transpose_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id   = query.message.chat_id
+    semitones = int(query.data.split(":")[1])
+    chord_data = context.chat_data.get("last_chord_data")
+    if not chord_data:
+        await query.message.reply_text("❌ Session expired. Please search again.")
+        return
+    original_key = detect_key_from_chords(chord_data["lines"]) or "?"
+    if semitones == 0:
+        display_key = original_key
+        key_label   = f"original key ({original_key})"
+    else:
+        display_key = CHROMATIC[(CHROMATIC.index(normalize_root(original_key)) + semitones) % 12]
+        key_label   = f"key of *{display_key}* ({semitones:+d} semitones)"
+    await query.message.reply_text(f"🎸 Generating PDF in {key_label}...", parse_mode="Markdown")
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        pdf_path = tmp.name
+    try:
+        build_pdf(chord_data, None, semitones if semitones != 0 else None, pdf_path)
+        filename = re.sub(r'[\\/*?:"<>|]', "_",
+                    f"{chord_data['artist']} - {chord_data['title']} ({display_key}).pdf")
+        with open(pdf_path, "rb") as f:
+            await context.bot.send_document(
+                chat_id=chat_id, document=f, filename=filename,
+                caption=f"🎵 {chord_data['title']} — {chord_data['artist']}\nKey: {display_key}\nSource: {chord_data['source_url']}",
+            )
+        await send_transpose_keyboard(context.bot, chat_id, chord_data)
+    except Exception as e:
+        await query.message.reply_text(f"❌ Error: {e}")
+    finally:
+        Path(pdf_path).unlink(missing_ok=True)
+        gc.collect()
+
 # ── Entry point ────
 if __name__ == "__main__":
     async def main():
@@ -519,6 +734,7 @@ if __name__ == "__main__":
         app.add_handler(CommandHandler("start", handle_start))
         app.add_handler(CommandHandler("help", handle_start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+        app.add_handler(CallbackQueryHandler(handle_transpose_callback, pattern=r"^tp:"))
 
         asyncio.create_task(scheduled_restart(app))
 
