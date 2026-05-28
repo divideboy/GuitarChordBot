@@ -216,6 +216,9 @@ def detect_key_from_chords(lines):
 def get_hard_chords_in_song(lines: list, semitones: int = 0) -> list:
     found = set()
     for line in lines:
+        # Skip metadata/description lines
+        if re.match(r'^\s*(key|play|capo|tuning|for|use|note|this|or|it|the)\b', line, re.IGNORECASE):
+            continue
         if is_chord_line(line):
             for m in CHORD_PATTERN.finditer(line):
                 chord = m.group(0)
@@ -441,14 +444,18 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         # BPM
         tempo_raw = tab_view.get("meta", {}).get("tempo", None)
         bpm = str(int(float(tempo_raw))) if tempo_raw else None
-        # Strumming pattern
-        strum = None
-        strum_match = re.search(
-            r'(?:strum(?:ming)?(?:\s+pattern)?[:\s]+)([DdUu \-↑↓x]+)',
-            content, re.IGNORECASE
+
+        # Strumming — check meta first, then scan content
+        strum = tab_view.get("meta", {}).get("strumming", None)
+        logger.info(f"Meta fields: {tab_view.get('meta', {})}")
+
+        if not strum:
+            strum_match = re.search(
+                r'(?:strum(?:ming)?(?:\s+pattern)?[:\s]*)([\dDdUu↑↓x\- ]{4,})',
+                content, re.IGNORECASE
             )
-        if strum_match:
-            strum = strum_match.group(1).strip()
+            if strum_match:
+                strum = strum_match.group(1).strip()
 
         return {
             "title": title,
