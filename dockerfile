@@ -16,6 +16,7 @@ COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+RUN playwright install chromium --with-deps
 
 # Copy bot code
 COPY bot.py key_profiles.py ./
