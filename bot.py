@@ -458,6 +458,7 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         strummings = tab_view.get("strummings", [])
         if strummings and isinstance(strummings, list) and len(strummings) > 0:
             first = strummings[0]
+            logger.info(f"strummings[0] raw: {strummings[0]}")
             if isinstance(first, dict):
                 strum = first.get("strumming") or first.get("pattern") or str(first)
             elif isinstance(first, str):
