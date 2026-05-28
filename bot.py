@@ -34,6 +34,8 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
+from key_profiles import KEY_PROFILES, BORROWED_CHORDS
+
 # ── Logging ────
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -183,66 +185,33 @@ def is_chord_line(line):
     return chord_hits / len(tokens) >= 0.5
 
 def detect_key_from_chords(lines):
-    MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
-    MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
-
-    CHORD_INTERVALS = {
-        "":     [0, 4, 7],
-        "m":    [0, 3, 7],
-        "7":    [0, 4, 7, 10],
-        "maj7": [0, 4, 7, 11],
-        "m7":   [0, 3, 7, 10],
-        "sus2": [0, 2, 7],
-        "sus4": [0, 5, 7],
-        "dim":  [0, 3, 6],
-        "aug":  [0, 4, 8],
-        "add9": [0, 4, 7, 14],
-    }
-
-    counts = [0.0] * 12
-    first_chord_done = False
-
+    # Collect all unique chords in the song
+    song_chords = set()
     for line in lines:
         if is_chord_line(line):
             for m in CHORD_PATTERN.finditer(line):
                 root = normalize_root(m.group(1))
                 quality = m.group(2) or ""
-                if root not in CHROMATIC:
-                    continue
-                root_idx = CHROMATIC.index(root)
-                intervals = CHORD_INTERVALS.get(quality, [0, 4, 7])
+                chord = root + ("m" if quality in ("m", "min", "min7", "m7") else "")
+                song_chords.add(simplify_chord(m.group(0)))
 
-                # Weight: root gets 3x, first chord gets extra 3x boost
-                root_weight = 9.0 if not first_chord_done else 3.0
-                interval_weight = 3.0 if not first_chord_done else 1.0
-                first_chord_done = True
-
-                counts[root_idx] += root_weight
-                for interval in intervals[1:]:  # skip root, already counted
-                    counts[(root_idx + interval) % 12] += interval_weight
-
-    if not any(counts):
+    if not song_chords:
         return None
 
-    def correlate(profile, shift):
-        shifted = profile[shift:] + profile[:shift]
-        mean_c = sum(counts) / 12
-        mean_p = sum(shifted) / 12
-        num = sum((counts[i] - mean_c) * (shifted[i] - mean_p) for i in range(12))
-        den = (sum((counts[i] - mean_c)**2 for i in range(12)) *
-               sum((shifted[i] - mean_p)**2 for i in range(12))) ** 0.5
-        return num / den if den else 0
+    best_key, best_score = None, -1
 
-    best_score, best_key, best_type = -999, None, None
-    for i in range(12):
-        maj_score = correlate(MAJOR_PROFILE, i)
-        min_score = correlate(MINOR_PROFILE, i)
-        if maj_score > best_score:
-            best_score, best_key, best_type = maj_score, CHROMATIC[i], "major"
-        if min_score > best_score:
-            best_score, best_key, best_type = min_score, CHROMATIC[i], "minor"
+    for key, diatonic in KEY_PROFILES.items():
+        diatonic_set  = set(diatonic)
+        borrowed_set  = set(BORROWED_CHORDS.get(key, []))
 
-    return f"{best_key}m" if best_type == "minor" else best_key
+        # Score: diatonic match = 2pts, borrowed match = 1pt
+        score = sum(2 for c in song_chords if c in diatonic_set)
+        score += sum(1 for c in song_chords if c in borrowed_set and c not in diatonic_set)
+
+        if score > best_score:
+            best_score, best_key = score, key
+
+    return best_key
 
 def get_hard_chords_in_song(lines: list, semitones: int = 0) -> list:
     found = set()
@@ -452,6 +421,9 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
 
         tab_data = data2["store"]["page"]["data"]["tab"]
         tab_view = data2["store"]["page"]["data"]["tab_view"]
+        meta = tab_view.get("meta", {}) or {}
+        logger.info(f"UG meta keys: {sorted(meta.keys())}")
+        logger.info(f"UG meta preview: { {k: meta.get(k) for k in sorted(meta.keys())} }")
 
         title       = tab_data.get("song_name", "Unknown")
         artist_name = tab_data.get("artist_name", "Unknown")
