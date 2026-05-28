@@ -186,13 +186,12 @@ def detect_key_from_chords(lines):
     MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
     MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
 
-    # Intervals for each chord type (semitones from root)
     CHORD_INTERVALS = {
-        "":     [0, 4, 7],        # major
-        "m":    [0, 3, 7],        # minor
-        "7":    [0, 4, 7, 10],    # dominant 7
-        "maj7": [0, 4, 7, 11],    # major 7
-        "m7":   [0, 3, 7, 10],    # minor 7
+        "":     [0, 4, 7],
+        "m":    [0, 3, 7],
+        "7":    [0, 4, 7, 10],
+        "maj7": [0, 4, 7, 11],
+        "m7":   [0, 3, 7, 10],
         "sus2": [0, 2, 7],
         "sus4": [0, 5, 7],
         "dim":  [0, 3, 6],
@@ -200,7 +199,9 @@ def detect_key_from_chords(lines):
         "add9": [0, 4, 7, 14],
     }
 
-    counts = [0] * 12
+    counts = [0.0] * 12
+    first_chord_done = False
+
     for line in lines:
         if is_chord_line(line):
             for m in CHORD_PATTERN.finditer(line):
@@ -210,8 +211,15 @@ def detect_key_from_chords(lines):
                     continue
                 root_idx = CHROMATIC.index(root)
                 intervals = CHORD_INTERVALS.get(quality, [0, 4, 7])
-                for interval in intervals:
-                    counts[(root_idx + interval) % 12] += 1
+
+                # Weight: root gets 3x, first chord gets extra 3x boost
+                root_weight = 9.0 if not first_chord_done else 3.0
+                interval_weight = 3.0 if not first_chord_done else 1.0
+                first_chord_done = True
+
+                counts[root_idx] += root_weight
+                for interval in intervals[1:]:  # skip root, already counted
+                    counts[(root_idx + interval) % 12] += interval_weight
 
     if not any(counts):
         return None
