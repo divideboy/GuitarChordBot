@@ -400,6 +400,15 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         artist_name = tab_data.get("artist_name", "Unknown")
         tuning      = tab_view.get("meta", {}).get("tuning", {}).get("value", "Standard")
         capo        = str(tab_view.get("meta", {}).get("capo", 0) or "None")
+
+        content = tab_view.get("wiki_tab", {}).get("content", "")
+        if not content:
+            content = tab_view.get("content", "")
+        content = re.sub(r"\[tab\]|\[/tab\]", "", content)
+        content = re.sub(r"\[ch\](.*?)\[/ch\]", r"\1", content)
+        content = clean_text(content)
+        lines = content.split("\n")
+
         # BPM
         tempo_raw = tab_view.get("meta", {}).get("tempo", None)
         bpm = str(int(float(tempo_raw))) if tempo_raw else None
@@ -411,14 +420,6 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
             )
         if strum_match:
             strum = strum_match.group(1).strip()
-
-        content = tab_view.get("wiki_tab", {}).get("content", "")
-        if not content:
-            content = tab_view.get("content", "")
-        content = re.sub(r"\[tab\]|\[/tab\]", "", content)
-        content = re.sub(r"\[ch\](.*?)\[/ch\]", r"\1", content)
-        content = clean_text(content)
-        lines = content.split("\n")
 
         return {
             "title": title,
