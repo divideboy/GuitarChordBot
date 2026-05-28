@@ -339,6 +339,41 @@ def pick_best_tab(results: list) -> str | None:
     )
     return best.get("tab_url")
 
+async def scrape_strumming_bpm(tab_url: str) -> dict:
+    from playwright.async_api import async_playwright
+    result = {"bpm": None, "strumming": None}
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            page = await browser.new_page()
+            await page.goto(tab_url, wait_until="domcontentloaded", timeout=60000)
+            await page.wait_for_timeout(3000)
+
+            # BPM
+            bpm_el = await page.query_selector("text=/\\d+ BPM/i")
+            if bpm_el:
+                bpm_text = await bpm_el.inner_text()
+                bpm_match = re.search(r'\d+', bpm_text)
+                if bpm_match:
+                    result["bpm"] = bpm_match.group(0)
+
+            # Strumming pattern
+            strum_section = await page.query_selector("h2:has-text('Strumming')")
+            if strum_section:
+                parent = await page.evaluate(
+                    "(el) => { const s = el.closest('section'); return s ? s.innerHTML : el.parentElement.innerHTML; }",
+                    strum_section
+                )
+                # Extract text content from the divs
+                strum_texts = re.findall(r'<div[^>]*>([DdUu↑↓x\- ]+)</div>', parent)
+                if strum_texts:
+                    result["strumming"] = " | ".join(t.strip() for t in strum_texts if t.strip())
+
+            await browser.close()
+    except Exception as e:
+        logger.warning(f"Strumming/BPM scrape failed: {e}")
+    return result
+
 
 async def search_and_scrape(song: str, artist: str) -> dict | None:
     """Use curl_cffi to bypass Cloudflare and scrape UG."""
@@ -441,13 +476,23 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         content = clean_text(content)
         lines = content.split("\n")
 
-        # BPM
-        tempo_raw = tab_view.get("meta", {}).get("tempo", None)
-        bpm = str(int(float(tempo_raw))) if tempo_raw else None
+        # # BPM
+        # tempo_raw = tab_view.get("meta", {}).get("tempo", None)
+        # bpm = str(int(float(tempo_raw))) if tempo_raw else None
 
-        # Strumming — check meta first, then scan content
-        strum = tab_view.get("meta", {}).get("strumming", None)
-        logger.info(f"Meta fields: {tab_view.get('meta', {})}")
+        # # Strumming — check meta first, then scan content
+        # strum = tab_view.get("meta", {}).get("strumming", None)
+        # logger.info(f"Meta fields: {tab_view.get('meta', {})}")
+
+        # BPM + Strumming via Playwright
+        strum_data = await scrape_strumming_bpm(tab_url)
+        bpm = strum_data["bpm"]
+        strum = strum_data["strumming"]
+
+        # Fallback BPM from JSON meta
+        if not bpm:
+            tempo_raw = tab_view.get("meta", {}).get("tempo", None)
+            bpm = str(int(float(tempo_raw))) if tempo_raw else None
 
         if not strum:
             strum_match = re.search(
