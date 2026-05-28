@@ -585,8 +585,8 @@ def parse_request(text: str):
     if key:
         if re.match(r'^[+-]\d+$', key):
             target_semitones = int(key)
-    elif re.match(r'^[A-G][b#]?$', key):
-        target_key = key
+        elif re.match(r'^[A-G][b#]?$', key):
+            target_key = key
 
     if key:
         key = key.capitalize()
@@ -602,7 +602,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not text:
         return
 
-    target_semitones, query, target_key = parse_request(text)
+    query, target_key, target_semitones = parse_request(text)
     logger.info(f"Parsed → query={query!r}, key={target_key!r}, semitones={target_semitones!r}")
 
     if not query:
