@@ -504,12 +504,7 @@ def build_pdf(chord_data: dict, target_key: str | None, target_semitones: int | 
 
     original_key = detect_key_from_chords(lines)
     semitones = 0
-    if target_semitones is not None and original_key:
-        semitones = target_semitones
-        display_key = CHROMATIC[(CHROMATIC.index(normalize_root(original_key)) + semitones) % 12]
-
-    elif target_key and original_key:
-        display_key = original_key or "?"
+    display_key = original_key or "?"
 
     if target_semitones is not None and original_key:
         semitones = target_semitones
