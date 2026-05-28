@@ -346,7 +346,7 @@ async def scrape_strumming_bpm(tab_url: str) -> dict:
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
             page = await browser.new_page()
-            await page.goto(tab_url, wait_until="domcontentloaded", timeout=60000)
+            await page.goto(tab_url, wait_until="domcontentloaded", timeout=30000)
             await page.wait_for_timeout(3000)
 
             # BPM
@@ -364,7 +364,6 @@ async def scrape_strumming_bpm(tab_url: str) -> dict:
                     "(el) => { const s = el.closest('section'); return s ? s.innerHTML : el.parentElement.innerHTML; }",
                     strum_section
                 )
-                # Extract text content from the divs
                 strum_texts = re.findall(r'<div[^>]*>([DdUu↑↓x\- ]+)</div>', parent)
                 if strum_texts:
                     result["strumming"] = " | ".join(t.strip() for t in strum_texts if t.strip())
@@ -485,7 +484,13 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         # logger.info(f"Meta fields: {tab_view.get('meta', {})}")
 
         # BPM + Strumming via Playwright
-        strum_data = await scrape_strumming_bpm(tab_url)
+        try:
+            strum_data = await asyncio.wait_for(scrape_strumming_bpm(tab_url), timeout=20)
+        except asyncio.TimeoutError:
+            logger.warning("Strumming/BPM scrape timed out, skipping")
+            strum_data = {"bpm": None, "strumming": None}
+            bpm = strum_data["bpm"]
+            strum = strum_data["strumming"]
         bpm = strum_data["bpm"]
         strum = strum_data["strumming"]
 
