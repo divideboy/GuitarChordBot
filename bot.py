@@ -183,18 +183,35 @@ def is_chord_line(line):
     return chord_hits / len(tokens) >= 0.5
 
 def detect_key_from_chords(lines):
-    # Krumhansl-Schmuckler key profiles
     MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
     MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
 
-    # Count note occurrences across all chords
+    # Intervals for each chord type (semitones from root)
+    CHORD_INTERVALS = {
+        "":     [0, 4, 7],        # major
+        "m":    [0, 3, 7],        # minor
+        "7":    [0, 4, 7, 10],    # dominant 7
+        "maj7": [0, 4, 7, 11],    # major 7
+        "m7":   [0, 3, 7, 10],    # minor 7
+        "sus2": [0, 2, 7],
+        "sus4": [0, 5, 7],
+        "dim":  [0, 3, 6],
+        "aug":  [0, 4, 8],
+        "add9": [0, 4, 7, 14],
+    }
+
     counts = [0] * 12
     for line in lines:
         if is_chord_line(line):
             for m in CHORD_PATTERN.finditer(line):
                 root = normalize_root(m.group(1))
-                if root in CHROMATIC:
-                    counts[CHROMATIC.index(root)] += 1
+                quality = m.group(2) or ""
+                if root not in CHROMATIC:
+                    continue
+                root_idx = CHROMATIC.index(root)
+                intervals = CHORD_INTERVALS.get(quality, [0, 4, 7])
+                for interval in intervals:
+                    counts[(root_idx + interval) % 12] += 1
 
     if not any(counts):
         return None
@@ -217,7 +234,7 @@ def detect_key_from_chords(lines):
         if min_score > best_score:
             best_score, best_key, best_type = min_score, CHROMATIC[i], "minor"
 
-    return best_key
+    return f"{best_key}m" if best_type == "minor" else best_key
 
 def get_hard_chords_in_song(lines: list, semitones: int = 0) -> list:
     found = set()
