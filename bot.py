@@ -339,40 +339,6 @@ def pick_best_tab(results: list) -> str | None:
     )
     return best.get("tab_url")
 
-async def scrape_strumming_bpm(tab_url: str) -> dict:
-    from playwright.async_api import async_playwright
-    result = {"bpm": None, "strumming": None}
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-            page = await browser.new_page()
-            await page.goto(tab_url, wait_until="domcontentloaded", timeout=30000)
-            await page.wait_for_timeout(3000)
-
-            # BPM
-            bpm_el = await page.query_selector("text=/\\d+ BPM/i")
-            if bpm_el:
-                bpm_text = await bpm_el.inner_text()
-                bpm_match = re.search(r'\d+', bpm_text)
-                if bpm_match:
-                    result["bpm"] = bpm_match.group(0)
-
-            # Strumming pattern
-            strum_section = await page.query_selector("h2:has-text('Strumming')")
-            if strum_section:
-                parent = await page.evaluate(
-                    "(el) => { const s = el.closest('section'); return s ? s.innerHTML : el.parentElement.innerHTML; }",
-                    strum_section
-                )
-                strum_texts = re.findall(r'<div[^>]*>([DdUu↑↓x\- ]+)</div>', parent)
-                if strum_texts:
-                    result["strumming"] = " | ".join(t.strip() for t in strum_texts if t.strip())
-
-            await browser.close()
-    except Exception as e:
-        logger.warning(f"Strumming/BPM scrape failed: {e}")
-    return result
-
 
 async def search_and_scrape(song: str, artist: str) -> dict | None:
     """Use curl_cffi to bypass Cloudflare and scrape UG."""
@@ -483,37 +449,21 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         content = clean_text(content)
         lines = content.split("\n")
 
-        # # BPM
-        # tempo_raw = tab_view.get("meta", {}).get("tempo", None)
-        # bpm = str(int(float(tempo_raw))) if tempo_raw else None
+        # BPM from meta
+        tempo_raw = meta.get("tempo", None)
+        bpm = str(int(float(tempo_raw))) if tempo_raw else None
 
-        # # Strumming — check meta first, then scan content
-        # strum = tab_view.get("meta", {}).get("strumming", None)
-        # logger.info(f"Meta fields: {tab_view.get('meta', {})}")
-
-        # BPM + Strumming via Playwright
-        try:
-            strum_data = await asyncio.wait_for(scrape_strumming_bpm(tab_url), timeout=20)
-        except asyncio.TimeoutError:
-            logger.warning("Strumming/BPM scrape timed out, skipping")
-            strum_data = {"bpm": None, "strumming": None}
-            bpm = strum_data["bpm"]
-            strum = strum_data["strumming"]
-        bpm = strum_data["bpm"]
-        strum = strum_data["strumming"]
-
-        # Fallback BPM from JSON meta
-        if not bpm:
-            tempo_raw = tab_view.get("meta", {}).get("tempo", None)
-            bpm = str(int(float(tempo_raw))) if tempo_raw else None
-
-        if not strum:
-            strum_match = re.search(
-                r'(?:strum(?:ming)?(?:\s+pattern)?[:\s]*)([\dDdUu↑↓x\- ]{4,})',
-                content, re.IGNORECASE
-            )
-            if strum_match:
-                strum = strum_match.group(1).strip()
+        # Strumming from tab_view["strummings"]
+        strum = None
+        strummings = tab_view.get("strummings", [])
+        if strummings and isinstance(strummings, list) and len(strummings) > 0:
+            first = strummings[0]
+            if isinstance(first, dict):
+                strum = first.get("strumming") or first.get("pattern") or str(first)
+            elif isinstance(first, str):
+                strum = first
+            logger.info(f"Strumming from JSON: {strum}")
+            logger.info(f"Full strummings: {strummings}")
 
         return {
             "title": title,
@@ -524,8 +474,7 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
             "source_url": tab_url,
             "bpm": bpm,
             "strumming": strum,
-}
-
+        }
 
     except Exception as e:
         logger.error(f"curl_cffi scrape error: {e}", exc_info=True)
@@ -826,7 +775,12 @@ async def handle_transpose_callback(update: Update, context: ContextTypes.DEFAUL
 # ── Entry point ────
 if __name__ == "__main__":
     async def main():
-        app = ApplicationBuilder().token(BOT_TOKEN).build()
+        app = (ApplicationBuilder()
+               .token(BOT_TOKEN)
+               .connect_timeout(30)
+               .read_timeout(30)
+               .write_timeout(30)
+               .build())
         app.add_handler(CommandHandler("start", handle_start))
         app.add_handler(CommandHandler("help", handle_start))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
