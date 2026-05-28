@@ -425,10 +425,10 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         tab_data = data2["store"]["page"]["data"]["tab"]
         tab_view = data2["store"]["page"]["data"]["tab_view"]
         meta = tab_view.get("meta", {}) or {}
-        logger.info(f"UG meta keys: {sorted(meta.keys())}")
-        logger.info(f"UG meta preview: { {k: meta.get(k) for k in sorted(meta.keys())} }")
+        # logger.info(f"UG meta keys: {sorted(meta.keys())}")
+        # logger.info(f"UG meta preview: { {k: meta.get(k) for k in sorted(meta.keys())} }")
         # ── NEW: Search raw HTML for BPM and strumming ────
-        logger.info(f"Full tab_view keys: {list(tab_view.keys())}")
+        # logger.info(f"Full tab_view keys: {list(tab_view.keys())}")
         bpm_match = re.search(r'"tempo"\s*:\s*(\d+)', html2)
         if bpm_match:
             logger.info(f"Found BPM in raw HTML: {bpm_match.group(1)}")
@@ -451,15 +451,17 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
 
         # Strumming decode map (UG measure codes)
         STRUM_MAP = {
-            1: "↓",
-            2: "↑",
-            3: "↓-",
-            4: "↑-",
+            1:   "↓",
+            2:   "↑",
+            3:   "↓.",   # dotted/held down
+            4:   "↑.",   # dotted/held up
             101: "↓x",
             102: "↑x",
             201: "↓",
             202: "↑",
-        }
+            203: "↓.",
+            204: "↑.",
+            }
 
         strum = None
         bpm = None
@@ -479,8 +481,10 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
 
                 # Prefix with part name
                 part = first.get("part", "")
+                denom = first.get("denuminator", "")
+                triplet = " (triplet)" if first.get("is_triplet") else ""
                 if part and strum:
-                    strum = f"{part}: {strum}"
+                    strum = f"{part} ({denom}/8{triplet}): {strum}"
             elif isinstance(first, str):
                 strum = first
 
