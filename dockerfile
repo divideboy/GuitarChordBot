@@ -18,7 +18,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy bot code
-COPY bot.py .
+COPY bot.py key_profiles.py ./
 
 # Run the bot
 CMD ["python", "bot.py"]
