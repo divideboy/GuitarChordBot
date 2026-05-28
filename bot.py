@@ -461,6 +461,14 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         meta = tab_view.get("meta", {}) or {}
         logger.info(f"UG meta keys: {sorted(meta.keys())}")
         logger.info(f"UG meta preview: { {k: meta.get(k) for k in sorted(meta.keys())} }")
+        # ── NEW: Search raw HTML for BPM and strumming ────
+        logger.info(f"Full tab_view keys: {list(tab_view.keys())}")
+        bpm_match = re.search(r'"tempo"\s*:\s*(\d+)', html2)
+        if bpm_match:
+            logger.info(f"Found BPM in raw HTML: {bpm_match.group(1)}")
+        strum_match_raw = re.search(r'"strumming"\s*:\s*"([^"]+)"', html2)
+        if strum_match_raw:
+            logger.info(f"Found strumming in raw HTML: {strum_match_raw.group(1)}")
 
         title       = tab_data.get("song_name", "Unknown")
         artist_name = tab_data.get("artist_name", "Unknown")
