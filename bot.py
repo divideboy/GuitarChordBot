@@ -183,12 +183,41 @@ def is_chord_line(line):
     return chord_hits / len(tokens) >= 0.5
 
 def detect_key_from_chords(lines):
+    # Krumhansl-Schmuckler key profiles
+    MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
+    MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+
+    # Count note occurrences across all chords
+    counts = [0] * 12
     for line in lines:
         if is_chord_line(line):
-            m = CHORD_PATTERN.search(line)
-            if m:
-                return normalize_root(m.group(1))
-    return None
+            for m in CHORD_PATTERN.finditer(line):
+                root = normalize_root(m.group(1))
+                if root in CHROMATIC:
+                    counts[CHROMATIC.index(root)] += 1
+
+    if not any(counts):
+        return None
+
+    def correlate(profile, shift):
+        shifted = profile[shift:] + profile[:shift]
+        mean_c = sum(counts) / 12
+        mean_p = sum(shifted) / 12
+        num = sum((counts[i] - mean_c) * (shifted[i] - mean_p) for i in range(12))
+        den = (sum((counts[i] - mean_c)**2 for i in range(12)) *
+               sum((shifted[i] - mean_p)**2 for i in range(12))) ** 0.5
+        return num / den if den else 0
+
+    best_score, best_key, best_type = -999, None, None
+    for i in range(12):
+        maj_score = correlate(MAJOR_PROFILE, i)
+        min_score = correlate(MINOR_PROFILE, i)
+        if maj_score > best_score:
+            best_score, best_key, best_type = maj_score, CHROMATIC[i], "major"
+        if min_score > best_score:
+            best_score, best_key, best_type = min_score, CHROMATIC[i], "minor"
+
+    return best_key
 
 def get_hard_chords_in_song(lines: list, semitones: int = 0) -> list:
     found = set()
