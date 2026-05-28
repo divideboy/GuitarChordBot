@@ -372,7 +372,7 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
             logger.warning("Cloudflare challenge hit on search page — all impersonations failed")
             return None
 
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(3.0 + random.uniform(0, 2))
 
         match = re.search(r'data-content="({.*?})"', html)
         if not match:
@@ -401,8 +401,17 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         # ── Step 2: Tab page ────
         logger.info(f"Fetching tab page: {tab_url}")
         html2 = None
+        tab_headers = {
+            **headers,
+            "Referer": "https://www.ultimate-guitar.com/search.php",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Fetch-User": "?1",
+            "Upgrade-Insecure-Requests": "1",
+        }
         for impersonate in ["chrome124", "chrome110", "safari17_0"]:
-            resp2 = await session.get(tab_url, impersonate=impersonate, headers=headers, timeout=30)
+            resp2 = await session.get(tab_url, impersonate=impersonate, headers=tab_headers, timeout=30)
             html2 = resp2.text
             if "Just a moment" not in html2 and "Performing security verification" not in html2:
                 break
