@@ -449,22 +449,45 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         content = clean_text(content)
         lines = content.split("\n")
 
-        # BPM from meta
-        tempo_raw = meta.get("tempo", None)
-        bpm = str(int(float(tempo_raw))) if tempo_raw else None
+        # Strumming decode map (UG measure codes)
+        STRUM_MAP = {
+            1: "↓",
+            2: "↑",
+            3: "↓-",
+            4: "↑-",
+            101: "↓x",
+            102: "↑x",
+            201: "↓",
+            202: "↑",
+        }
 
-        # Strumming from tab_view["strummings"]
         strum = None
+        bpm = None
         strummings = tab_view.get("strummings", [])
         if strummings and isinstance(strummings, list) and len(strummings) > 0:
             first = strummings[0]
-            logger.info(f"strummings[0] raw: {strummings[0]}")
             if isinstance(first, dict):
-                strum = first.get("strumming") or first.get("pattern") or str(first)
+                # BPM
+                if first.get("bpm"):
+                    bpm = str(first["bpm"])
+
+                # Decode measures
+                measures = first.get("measures", [])
+                beats = [STRUM_MAP.get(m.get("measure", 0), "?") for m in measures]
+                if beats:
+                    strum = " ".join(beats)
+
+                # Prefix with part name
+                part = first.get("part", "")
+                if part and strum:
+                    strum = f"{part}: {strum}"
             elif isinstance(first, str):
                 strum = first
-            logger.info(f"Strumming from JSON: {strum}")
-            logger.info(f"Full strummings: {strummings}")
+
+        # Fallback BPM from meta
+        if not bpm:
+            tempo_raw = meta.get("tempo", None)
+            bpm = str(int(float(tempo_raw))) if tempo_raw else None
 
         return {
             "title": title,
