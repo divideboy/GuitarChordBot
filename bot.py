@@ -609,9 +609,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text('Please send a request like:\n"Wonderwall Oasis"')
         return
 
-    words = query.split()
-    artist_guess = words[-1] if len(words) >= 2 else query
-    song_guess   = " ".join(words[:-1]) if len(words) >= 2 else query
+    if " by " in query.lower():
+        idx = query.lower().index(" by ")
+        song_guess   = query[:idx].strip()
+        artist_guess = query[idx + 4:].strip()
+
+    else:
+        words = query.split()
+        artist_guess = words[-1] if len(words) >= 2 else query
+        song_guess   = " ".join(words[:-1]) if len(words) >= 2 else query
 
     await update.message.reply_text(f'🔍 Searching for: *{query}*...', parse_mode="Markdown")
 
