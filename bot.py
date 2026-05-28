@@ -30,6 +30,9 @@ from reportlab.platypus import (
     Preformatted, Table, TableStyle, Flowable,
 )
 from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 # ── Logging ────
 logging.basicConfig(
