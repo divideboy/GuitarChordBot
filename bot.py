@@ -368,12 +368,14 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         # ── Step 1: Search page ────
         logger.info(f"Fetching: {ug_search_url}")
         html = None
-        for impersonate in ["chrome124", "chrome110", "safari17_0"]:
+        for impersonate in ["chrome131", "chrome124", "chrome120", "edge101", "safari18_0", "safari17_0"]:
             resp = await session.get(ug_search_url, impersonate=impersonate, headers=headers, timeout=30)
             html = resp.text
             if "Just a moment" not in html and "Performing security verification" not in html:
                 break
             logger.warning(f"Cloudflare challenge with {impersonate}, retrying...")
+            await asyncio.sleep(2.0)
+            global _session
             _session = None
             session = get_session()
 
