@@ -70,6 +70,11 @@ HARD_CHORD_DIAGRAMS = {
     "Ab":  {"pos": [ 4,  6,  6,  5,  4,  4], "base": 4},
 }
 
+def _title_similarity(a: str, b: str) -> float:
+    """Return a 0–1 similarity ratio between two strings (case-insensitive)."""
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
+
 class ChordDiagram(Flowable):
     S_GAP = 6; F_GAP = 6.5; FRETS = 4; N_STR = 6; DOT_R = 2.4; PAD = 5
 
@@ -336,9 +341,14 @@ def pick_best_tab(results: list, song: str = "", artist: str = "") -> str | None
     pool = relevant if relevant else chord_tabs
 
     def score(r):
+        r_song   = r.get("song_name", "")
+        r_artist = r.get("artist_name", "")
+        title_sim  = _title_similarity(song, r_song)
+        artist_sim = _title_similarity(artist, r_artist)
         rating = float(r.get("rating", 0) or 0)
         votes  = int(r.get("votes", 0) or 0)
-        return rating * math.log(votes + 1)
+        popularity = rating * math.log(votes + 1)
+        return title_sim * 8 + artist_sim * 3 + popularity * 0.2
 
     best = max(pool, key=score)
     logger.info(
