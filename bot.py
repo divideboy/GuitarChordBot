@@ -69,11 +69,17 @@ HARD_CHORD_DIAGRAMS = {
     "G#m": {"pos": [ 4,  6,  6,  4,  4,  4], "base": 4},
     "Ab":  {"pos": [ 4,  6,  6,  5,  4,  4], "base": 4},
 }
-
 def _title_similarity(a: str, b: str) -> float:
-    """Return a 0–1 similarity ratio between two strings (case-insensitive)."""
-    from difflib import SequenceMatcher
-    return SequenceMatcher(None, a.lower().strip(), b.lower().strip()).ratio()
+    """Word-level Jaccard similarity — avoids false positives from shared characters."""
+    set_a = set(a.lower().strip().split())
+    set_b = set(b.lower().strip().split())
+    if not set_a and not set_b:
+        return 1.0
+    if not set_a or not set_b:
+        return 0.0
+    intersection = set_a & set_b
+    union = set_a | set_b
+    return len(intersection) / len(union)
 
 class ChordDiagram(Flowable):
     S_GAP = 6; F_GAP = 6.5; FRETS = 4; N_STR = 6; DOT_R = 2.4; PAD = 5
