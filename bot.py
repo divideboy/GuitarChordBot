@@ -309,30 +309,38 @@ async def get_js_store(page) -> dict | None:
     return None
 
 
-def pick_best_tab(results: list) -> str | None:
+def pick_best_tab(results: list, song: str = "", artist: str = "") -> str | None:
     """
     From a list of UG search results, pick the Chords tab with the
     highest (vote_count * rating) score — i.e. highest rated with
-    the most votes wins.
+    the most votes wins, among results that actually match the query.
     """
+    # Words from the query longer than 3 chars used for relevance check
+    search_words = {w.lower() for w in (song + " " + artist).split() if len(w) > 3}
+
+    def relevance(r):
+        name = (r.get("song_name", "") + " " + r.get("artist_name", "")).lower()
+        return sum(1 for w in search_words if w in name)
+
     chord_tabs = [
         r for r in results
         if r.get("type") == "Chords" and not r.get("marketing_type")
     ]
     if not chord_tabs:
-        # fallback: any chords-like type
         chord_tabs = [r for r in results if "chord" in r.get("type", "").lower()]
     if not chord_tabs:
         return None
 
+    # Prefer tabs with at least 1 matching word; fall back to all if nothing matches
+    relevant = [r for r in chord_tabs if relevance(r) >= 1]
+    pool = relevant if relevant else chord_tabs
+
     def score(r):
-        rating     = float(r.get("rating", 0) or 0)
-        votes      = int(r.get("votes", 0) or 0)
-        # weighted: rating * log(votes+1) so a 5-star with 1000 votes
-        # beats a 5-star with 2 votes
+        rating = float(r.get("rating", 0) or 0)
+        votes  = int(r.get("votes", 0) or 0)
         return rating * math.log(votes + 1)
 
-    best = max(chord_tabs, key=score)
+    best = max(pool, key=score)
     logger.info(
         f"Picked tab: {best.get('song_name')} | "
         f"rating={best.get('rating')} votes={best.get('votes')} "
@@ -394,7 +402,7 @@ async def search_and_scrape(song: str, artist: str) -> dict | None:
         for r in results[:5]:
             logger.info(f"  [{r.get('type')}] {r.get('song_name')} — rating={r.get('rating')} votes={r.get('votes')}")
 
-        tab_url = pick_best_tab(results)
+        tab_url = pick_best_tab(results, song, artist)
         if not tab_url:
             logger.warning("No chords tab found in results")
             return None
@@ -687,7 +695,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if " by " in query.lower():
-        idx = query.lower().index(" by ")
+        idx = query.lower().rindex(" by ")  # last "by" = song/artist separator
         song_guess   = query[:idx].strip()
         artist_guess = query[idx + 4:].strip()
 
