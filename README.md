@@ -5,39 +5,9 @@ Searches Ultimate Guitar for chord sheets, optionally transposes them, and sends
 ## How users interact with it
 
 ```
-"Wonderwall Oasis"                  → default key, simplified chords
-"Wonderwall Oasis" "G"              → transposed to G
-"Hotel California Eagles" "Am"      → transposed to Am
-```
-
----
-
-## Setup
-
-### 1. Create a Telegram Bot
-
-1. Open Telegram and message [@BotFather](https://t.me/BotFather)
-2. Send `/newbot` and follow the prompts
-3. Copy the **token** you receive
-
-### 2. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Set your bot token
-
-Either edit `bot.py` and replace `"YOUR_BOT_TOKEN_HERE"`, or set an env variable:
-
-```bash
-export TELEGRAM_BOT_TOKEN="your_token_here"
-```
-
-### 4. Run
-
-```bash
-python bot.py
+Wonderwall by Oasis                  → default key, simplified chords
+Wonderwall by Oasis "G"              → transposed to G
+Hotel California by Eagles "Am"      → transposed to Am
 ```
 
 ---
@@ -45,7 +15,7 @@ python bot.py
 ## How it works
 
 ```
-User sends: "Wonderwall Oasis" "G"
+User sends: Wonderwall by Oasis "G"
         │
         ▼
 Parse request → song="Wonderwall", artist="Oasis", key="G"
@@ -65,6 +35,7 @@ Transpose all chord lines by N semitones
         ▼
 Render to PDF (ReportLab) with:
   - Title & artist header
+  - BPM and strumming pattern of song (if it's available)
   - Tuning / Capo / Key metadata
   - Color-coded chord lines (red) vs lyrics (black)
   - Section headers (Verse, Chorus, etc.)
